@@ -155,7 +155,7 @@ bool read_log(size_t *read, size_t *length, time_t *time, uint64_t *timestamp,
 
   if (print_field(jh, "_HOSTNAME", ' ', read, p, p_max_size) < 0) return false;
 
-  if (print_field(jh, "SYSLOG_IDENTIFIER", '[', read, p, p_max_size) < 0)
+  if (print_field(jh, "_COMM", '[', read, p, p_max_size) < 0)
     return false;
 
   if (print_field(jh, "_PID", ']', read, p, p_max_size) < 0) return false;
