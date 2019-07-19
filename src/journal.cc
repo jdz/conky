@@ -172,7 +172,7 @@ bool read_log(size_t *read, size_t *length, time_t *time, uint64_t *timestamp,
   }
   p[(*read)++] = ' ';
 
-  if (print_field(jh, "MESSAGE", '\n', read, p, p_max_size) < 0) return false;
+  if (print_field(jh, "MESSAGE", 0, read, p, p_max_size) < 0) return false;
   return true;
 }
 
@@ -199,8 +199,11 @@ void print_journal(struct text_object *obj, char *p, unsigned int p_max_size) {
   }
 
   while (read_log(&read, &length, &time, &timestamp, jh, p, p_max_size) &&
-         0 < sd_journal_next(jh))
-    ;
+         0 < sd_journal_next(jh)) {
+    if (p_max_size < read) {
+      p[read++] = '\n';
+    }
+  }
 
 out:
   if (jh) sd_journal_close(jh);
