@@ -108,9 +108,18 @@ static int print_field(sd_journal *jh, const char *field, char spacer,
   size_t fieldlen = strlen(field) + 1;
 
   int ret = sd_journal_get_data(jh, field, &get, &length);
-  if (ret == -ENOENT) goto out;
-
-  if (ret < 0 || length + *read > p_max_size) return -1;
+  if (ret == -ENOENT) {
+    NORM_ERR("No such field: %s", field);
+    goto out;
+  }
+  if (ret < 0) {
+    NORM_ERR("Failed to read message field: %s", strerror(-ret));
+    return -1;
+  }
+  if (length + *read > p_max_size) {
+    NORM_ERR("Out of buffer space");
+    return -1;
+  }
 
   memcpy(p + *read, (const char *)get + fieldlen, length - fieldlen);
   *read += length - fieldlen;
@@ -142,7 +151,7 @@ bool read_log(size_t *read, size_t *length, time_t *time, uint64_t *timestamp,
     *read = p_max_size - 1;
     return false;
   }
-  p[*read++] = ' ';
+  p[(*read)++] = ' ';
 
   if (print_field(jh, "_HOSTNAME", ' ', read, p, p_max_size) < 0) return false;
 
@@ -155,13 +164,13 @@ bool read_log(size_t *read, size_t *length, time_t *time, uint64_t *timestamp,
     *read = p_max_size - 1;
     return false;
   }
-  p[*read++] = ':';
+  p[(*read)++] = ':';
 
   if (p_max_size < *read) {
     *read = p_max_size - 1;
     return false;
   }
-  p[*read++] = ' ';
+  p[(*read)++] = ' ';
 
   if (print_field(jh, "MESSAGE", '\n', read, p, p_max_size) < 0) return false;
   return true;
@@ -190,7 +199,7 @@ void print_journal(struct text_object *obj, char *p, unsigned int p_max_size) {
   }
 
   while (read_log(&read, &length, &time, &timestamp, jh, p, p_max_size) &&
-         sd_journal_next(jh))
+         0 < sd_journal_next(jh))
     ;
 
 out:
