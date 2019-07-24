@@ -101,38 +101,46 @@ void init_journal(const char *type, const char *arg, struct text_object *obj,
   obj->data.opaque = j;
 }
 
-static int print_field(sd_journal *jh, const char *field, char spacer,
+static bool print_char(char ch, size_t *read, char *p, unsigned int p_max_size) {
+  if (*read < p_max_size) {
+    p[(*read)++] = ch;
+    return true;
+  }
+  else {
+    return false;
+  }
+}
+
+static int print_field(sd_journal *jh, const char *field,
                        size_t *read, char *p, unsigned int p_max_size) {
   const void *get;
   size_t length;
   size_t fieldlen = strlen(field) + 1;
 
   int ret = sd_journal_get_data(jh, field, &get, &length);
-  if (ret == -ENOENT) {
-    NORM_ERR("No such field: %s", field);
-    goto out;
-  }
   if (ret < 0) {
-    NORM_ERR("Failed to read message field: %s", strerror(-ret));
-    return -1;
+    return ret;
   }
   if (length + *read > p_max_size) {
-    NORM_ERR("Out of buffer space");
     return -1;
   }
 
-  memcpy(p + *read, (const char *)get + fieldlen, length - fieldlen);
-  *read += length - fieldlen;
-
-out:
-  if (spacer) {
-    if (p_max_size < *read) {
-      *read = p_max_size - 1;
-    } else {
-      p[(*read)++] = spacer;
-    }
+  // Only collect first line of the field.  Until we can properly deal
+  // with multi-line messages.
+  const char *start = (const char*)get + fieldlen;
+  const void *eol = memchr((const void*)start, '\n', length - fieldlen);
+  size_t nchars = (eol == NULL) ? length - fieldlen : (const char*)eol - start;
+  nchars = std::min(nchars, p_max_size - *read);
+  memcpy(p + *read, start, nchars);
+  *read += nchars;
+  if (eol != NULL) {
+    // UTF-8 for "LEFTWARDS ARROW WITH HOOK";
+    print_char(0xe2, read, p, p_max_size);
+    print_char(0x86, read, p, p_max_size);
+    print_char(0xa9, read, p, p_max_size);
   }
-  return length ? length - fieldlen : 0;
+
+  return nchars;
 }
 
 bool read_log(size_t *read, size_t *length, time_t *time, uint64_t *timestamp,
@@ -146,34 +154,26 @@ bool read_log(size_t *read, size_t *length, time_t *time, uint64_t *timestamp,
            strftime(p + *read, p_max_size - *read, "%b %d %H:%M:%S", &tm)) <= 0)
     return false;
   *read += *length;
+  print_char(' ', read, p, p_max_size);
 
-  if (p_max_size < *read) {
-    *read = p_max_size - 1;
-    return false;
+  if (print_field(jh, "_HOSTNAME", read, p, p_max_size) != -ENOENT) {
+    print_char(' ', read, p, p_max_size);
   }
-  p[(*read)++] = ' ';
 
-  if (print_field(jh, "_HOSTNAME", ' ', read, p, p_max_size) < 0) return false;
-
-  if (print_field(jh, "_COMM", '[', read, p, p_max_size) < 0)
-    return false;
-
-  if (print_field(jh, "_PID", ']', read, p, p_max_size) < 0) return false;
-
-  if (p_max_size < *read) {
-    *read = p_max_size - 1;
-    return false;
+  if (print_field(jh, "_COMM", read, p, p_max_size) != -ENOENT) {
+    print_char('[', read, p, p_max_size);
+    print_field(jh, "_PID", read, p, p_max_size);
+    print_char(']', read, p, p_max_size);
   }
-  p[(*read)++] = ':';
-
-  if (p_max_size < *read) {
-    *read = p_max_size - 1;
-    return false;
+  else {
+    print_field(jh, "SYSLOG_IDENTIFIER", read, p, p_max_size);
   }
-  p[(*read)++] = ' ';
+  print_char(':', read, p, p_max_size);
+  print_char(' ', read, p, p_max_size);
 
-  if (print_field(jh, "MESSAGE", 0, read, p, p_max_size) < 0) return false;
-  return true;
+  print_field(jh, "MESSAGE", read, p, p_max_size);
+
+  return *read < p_max_size;
 }
 
 void print_journal(struct text_object *obj, char *p, unsigned int p_max_size) {
@@ -200,9 +200,8 @@ void print_journal(struct text_object *obj, char *p, unsigned int p_max_size) {
 
   while (read_log(&read, &length, &time, &timestamp, jh, p, p_max_size) &&
          0 < sd_journal_next(jh)) {
-    if (p_max_size < read) {
-      p[read++] = '\n';
-    }
+    // Only add a newline between entries, not at the end.
+    print_char('\n', &read, p, p_max_size);
   }
 
 out:
