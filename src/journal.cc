@@ -154,7 +154,14 @@ bool read_log(size_t *read, size_t *length, time_t *time, uint64_t *timestamp,
            strftime(p + *read, p_max_size - *read, "%b %d %H:%M:%S", &tm)) <= 0)
     return false;
   *read += *length;
-  print_char(' ', read, p, p_max_size);
+  if (p_max_size < *read + 8) {
+    return false;
+  }
+  else {
+    unsigned int usec = *timestamp % 1000000;
+    sprintf(p + *read, ".%06u ", usec);
+    *read += 8;
+  }
 
   if (print_field(jh, "_HOSTNAME", read, p, p_max_size) != -ENOENT) {
     print_char(' ', read, p, p_max_size);
