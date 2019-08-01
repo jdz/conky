@@ -143,6 +143,20 @@ static int print_field(sd_journal *jh, const char *field,
   return nchars;
 }
 
+static const char* get_journal_field(sd_journal *j, const char *field) {
+  size_t length;
+  size_t fieldlen = strlen(field) + 1;
+  const void *data;
+
+  int ret = sd_journal_get_data(j, field, &data, &length);
+  if (ret < 0 || length <= fieldlen) {
+    return NULL;
+  }
+  else {
+    return (const char*)data + fieldlen;
+  }
+}
+
 bool read_log(size_t *read, size_t *length, time_t *time, uint64_t *timestamp,
               sd_journal *jh, char *p, unsigned int p_max_size) {
   struct tm tm;
@@ -167,13 +181,26 @@ bool read_log(size_t *read, size_t *length, time_t *time, uint64_t *timestamp,
     print_char(' ', read, p, p_max_size);
   }
 
-  if (print_field(jh, "_COMM", read, p, p_max_size) != -ENOENT) {
+  const char *str;
+  if (sd_journal_get_data(jh, "_TRANSPORT", (const void**)&str, length) < 0
+      || *length <= 11
+      || 0 == strncmp("audit", str + 11, 5)
+      || 0 == strncmp("kernel", str + 11, 6)) {
+    // audit always? has pid=1, and it also appears in the message.
+    //
+    // For kernel we could also use the PRIORITY field, but not sure
+    // if conky allows to switch colors or fonts mid-message.
+    print_field(jh, "SYSLOG_IDENTIFIER", read, p, p_max_size);
+  }
+  else {
+    // SYSLOG_IDENTIFIER is not always present (e.g., if the transport
+    // is "journal").
+    if (print_field(jh, "SYSLOG_IDENTIFIER", read, p, p_max_size) == -ENOENT) {
+      print_field(jh, "_COMM", read, p, p_max_size);
+    }
     print_char('[', read, p, p_max_size);
     print_field(jh, "_PID", read, p, p_max_size);
     print_char(']', read, p, p_max_size);
-  }
-  else {
-    print_field(jh, "SYSLOG_IDENTIFIER", read, p, p_max_size);
   }
   print_char(':', read, p, p_max_size);
   print_char(' ', read, p, p_max_size);
